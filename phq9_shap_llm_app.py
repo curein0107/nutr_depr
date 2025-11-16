@@ -395,71 +395,117 @@ def main() -> None:
         st.subheader("맞춤형 설명")
         st.write(explanation)
 
-        # 영양소별 영향 분석: 우울증 위험을 증가/감소시키는 영양소 TOP 5 시각화
-        # 영양소 변수 목록 정의
-        nutrient_features = {
-            "food_intake",
-            "calorie_intake",
-            "weter_intake",
-            "protein",
-            "saturated_fatty_acid",
-            "mono_unsaturated_fatty_acid",
-            "n3_fatty_acid",
-            "n6_fatty_acid",
-            "cholesterol",
-            "carbohydrate",
-            "dietary_fiber",
-            "calcium",
-            "phosphorus",
-            "iron",
-            "soudim",
-            "potassium",
-            "betacarotine",
-            "retinol",
-            "vitamin_b1",
-            "vitamin_b2",
-            "vitamin_b3",
-            "vitamin_c",
+        # 범주별 긍정적(우울증 위험 증가) 영향 분석 및 시각화
+        # 각 특성을 범주에 매핑한다
+        categories: Dict[str, List[str]] = {
+            "일반적 특성": [
+                "sex",
+                "age",
+                "individual_income",
+                "household_income",
+                "education_level",
+                "occupation",
+                "number_of_household_member",
+                "house_status",
+                "marital_statues",
+            ],
+            "직업 특성": [
+                "labor_hour",
+                "hpa_work",
+                "mpa_work",
+            ],
+            "건강행태": [
+                "smoking",
+                "drinking",
+                "stress",
+                "hpa_leisure",
+                "mpa_leisure",
+                "walk",
+                "sedantary_hour",
+            ],
+            "건강상태": [
+                "subjective_health_status",
+                "unmet_medical_care",
+                "body_mass_index",
+            ],
+            "영양소": [
+                "food_intake",
+                "calorie_intake",
+                "weter_intake",
+                "protein",
+                "saturated_fatty_acid",
+                "mono_unsaturated_fatty_acid",
+                "n3_fatty_acid",
+                "n6_fatty_acid",
+                "cholesterol",
+                "carbohydrate",
+                "dietary_fiber",
+                "calcium",
+                "phosphorus",
+                "iron",
+                "soudim",
+                "potassium",
+                "betacarotine",
+                "retinol",
+                "vitamin_b1",
+                "vitamin_b2",
+                "vitamin_b3",
+                "vitamin_c",
+            ],
+            "질병 현황": [
+                "cardiovascular_disease",
+                "arthritis_disease",
+                "pulmonary_disease",
+                "liver_disease",
+                "thyroid_disease",
+                "t2_diabetes_mellitus",
+                "atopic_dermatitis",
+                "allergic_rhinitis",
+                "renal_disease",
+                "cancer",
+            ],
         }
-        pos_pairs: List[tuple[str, float]] = []
-        neg_pairs: List[tuple[str, float]] = []
-        for i, fname in enumerate(feature_names):
-            if fname in nutrient_features:
-                val = contributions[i]
-                if val > 0:
-                    pos_pairs.append((fname, float(val)))
-                elif val < 0:
-                    neg_pairs.append((fname, float(-val)))  # magnitude for sorting
-        # 정렬하여 상위 5개 선택
-        pos_pairs_sorted = sorted(pos_pairs, key=lambda x: x[1], reverse=True)[:5]
-        neg_pairs_sorted = sorted(neg_pairs, key=lambda x: x[1], reverse=True)[:5]
-        # 데이터프레임 생성
-        if pos_pairs_sorted:
-            pos_df = pd.DataFrame(
-                {"중요도": [v for (_, v) in pos_pairs_sorted]},
-                index=[name for (name, _) in pos_pairs_sorted],
-            )
-        else:
-            pos_df = pd.DataFrame()
-        if neg_pairs_sorted:
-            neg_df = pd.DataFrame(
-                {"중요도": [v for (_, v) in neg_pairs_sorted]},
-                index=[name for (name, _) in neg_pairs_sorted],
-            )
-        else:
-            neg_df = pd.DataFrame()
-        # 시각화
-        st.subheader("우울증 위험을 증가시키는 영양소 TOP 5")
-        if not pos_df.empty:
-            st.bar_chart(pos_df)
-        else:
-            st.write("예측 결과에서 위험을 증가시키는 영양소가 없습니다.")
-        st.subheader("우울증 위험을 감소시키는 영양소 TOP 5")
-        if not neg_df.empty:
-            # 감소 방향은 그래프에서 크기를 양수로 표현하고 레이블에서 감소임을 설명한다
-            st.bar_chart(neg_df)
-        else:
-            st.write("예측 결과에서 위험을 감소시키는 영양소가 없습니다.")
+        # 각 범주별로 양의 기여도를 가진 특성을 수집하여 TOP 5를 시각화한다
+        for cat_name, cat_features in categories.items():
+            # 해당 범주 내 양의 기여도 목록 수집
+            pairs: List[tuple[str, float]] = []
+            for i, fname in enumerate(feature_names):
+                if fname in cat_features:
+                    val = contributions[i]
+                    if val > 0:
+                        pairs.append((fname, float(val)))
+            # 상위 5개 추출
+            pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)[:5]
+            if pairs_sorted:
+                df = pd.DataFrame(
+                    {"중요도": [v for (_, v) in pairs_sorted]},
+                    index=[name for (name, _) in pairs_sorted],
+                )
+            else:
+                df = pd.DataFrame()
+            # 제목 및 시각화
+            st.subheader(f"{cat_name} - 우울증 위험을 증가시키는 TOP 5")
+            if not df.empty:
+                st.bar_chart(df)
+            else:
+                st.write("이 범주에서 위험을 증가시키는 요소가 없습니다.")
+
+    # 챗봇 인터페이스
+    st.markdown("---")
+    st.subheader("챗봇에게 질문하기")
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+    user_question = st.chat_input("궁금한 내용을 입력하세요.")
+    if user_question:
+        st.session_state.messages.append({"role": "user", "content": user_question})
+        st.chat_message("user").write(user_question)
+        generator = load_text_generator()
+        answer = respond_chat(user_question, generator=generator)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.chat_message("assistant").write(answer)
+
 
 if __name__ == "__main__":
     main()
