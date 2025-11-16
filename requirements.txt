@@ -1,10 +1,11 @@
 streamlit
+scikit-learn
 numpy
 pandas
-scikit-learn
 joblib
 pickle
-transformers
-torch
+transformers==4.36.2
+torch==2.0.1+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
+xgboost==1.7.6
 sentencepiece
-xgboost
