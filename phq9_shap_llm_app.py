@@ -489,3 +489,6 @@ def main() -> None:
                 st.bar_chart(df)
             else:
                 st.write("이 범주에서 위험을 증가시키는 요소가 없습니다.")
+
+if __name__ == "__main__":
+    main()
