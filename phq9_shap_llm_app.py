@@ -489,23 +489,3 @@ def main() -> None:
                 st.bar_chart(df)
             else:
                 st.write("이 범주에서 위험을 증가시키는 요소가 없습니다.")
-
-    # 챗봇 인터페이스
-    st.markdown("---")
-    st.subheader("챗봇에게 질문하기")
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    for msg in st.session_state.messages:
-        st.chat_message(msg["role"]).write(msg["content"])
-    user_question = st.chat_input("궁금한 내용을 입력하세요.")
-    if user_question:
-        st.session_state.messages.append({"role": "user", "content": user_question})
-        st.chat_message("user").write(user_question)
-        generator = load_text_generator()
-        answer = respond_chat(user_question, generator=generator)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-        st.chat_message("assistant").write(answer)
-
-
-if __name__ == "__main__":
-    main()
