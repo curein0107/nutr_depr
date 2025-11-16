@@ -1,4 +1,4 @@
-# CLI PHQ9 + SHAP + LLM App
+# 영양학적 요소를 고려한 우울증 예측
 
 Run:
 ```
