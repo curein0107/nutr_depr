@@ -1,8 +1,10 @@
 streamlit
-scikit-learn
 numpy
 pandas
+scikit-learn
 joblib
+pickle
 transformers
 torch
 sentencepiece
+xgboost
