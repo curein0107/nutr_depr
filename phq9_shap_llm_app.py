@@ -1,3 +1,31 @@
+"""
+phq9_streamlit_app.py
+======================
+
+이 Streamlit 애플리케이션은 영양 섭취 데이터를 바탕으로 우울증 위험도를 추정하고,
+모델이 판단한 핵심 영향 요인을 사용자에게 보여줍니다. 또한 간단한
+자연어 설명과 챗봇 인터페이스를 제공하여 추가적인 궁금증에 답하도록
+설계되었습니다. 기존의 데모 스크립트(`phq9_shap_llm_app.py`)는 커맨드라인
+용으로 작성되어 있으며 `shap`와 `transformers` 라이브러리에 의존합니다.
+이 앱은 다음과 같은 이유로 경량화와 최적화에 초점을 맞춥니다:
+
+* 외부 네트워크 접속 없이 실행되도록 하기 위해 `shap`과 대형 LLM
+  라이브러리에 대한 의존성을 제거하거나 선택적으로 사용합니다.
+* Streamlit의 캐싱 기능을 활용하여 모델과 기타 리소스를 한 번만
+  로드하도록 하여 반복 실행 시 속도를 향상시킵니다.
+* 모델의 특성 중요도를 SHAP 대신 scikit‑learn의 `coef_` 혹은
+  `feature_importances_` 속성을 이용해 근사합니다. 이렇게 하면
+  의존성을 줄이고 계산을 단순화할 수 있습니다.
+* 사용자 입력을 웹 양식으로 받고 결과를 시각적으로 표시하여
+  사용성이 높습니다.
+* 추가 질문을 입력할 수 있는 챗봇 영역을 제공하지만, 의료적
+  조언이 아닌 일반적인 정보만을 제공합니다. 챗봇 응답은 간단한
+  규칙 기반 혹은 작은 LLM(사용 가능한 경우)을 사용해 생성됩니다.
+
+주의: 이 앱은 교육적 목적과 자기 이해를 돕기 위한 참고용입니다.
+정확한 진단이나 치료를 위해서는 반드시 정신건강 전문가와 상담해야 합니다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -205,8 +233,9 @@ def build_explanation(
     lines.append(f"예측된 우울증 위험도는 {probability * 100:.1f}%입니다.")
     for feat in top_features:
         kor_direction = "증가" if feat["direction"] == "increase" else "감소"
-        lines.append(f"'{feat['feature']}' 섭취가 {kor_direction} 방향으로 우울증 위험에 영향을 미칩니다.")
-    lines.append("균형 잡힌 식단과 적절한 영양 섭취는 정신 건강에 긍정적인 영향을 줄 수 있습니다.")
+        # 변수 값의 변화 방향에 따라 위험도 영향을 설명
+        lines.append(f"'{feat['feature']}' 값이 {kor_direction} 방향으로 우울증 위험에 영향을 미칩니다.")
+    lines.append("정기적인 운동과 균형 잡힌 생활 습관이 정신 건강 유지에 도움이 될 수 있습니다.")
     return "\n".join(lines)
 
 
@@ -251,58 +280,111 @@ def respond_chat(user_query: str, generator: Optional[callable] = None) -> str:
 
 def main() -> None:
     """
-    Streamlit 애플리케이션의 메인 함수. 기능:
-    1. 모델 로딩 및 캐시
-    2. 사용자 입력 폼 표시
-    3. 예측과 기여도 계산, 설명 생성
-    4. 챗봇 인터페이스 제공
+    Streamlit 애플리케이션의 메인 함수.
+
+    * 모델을 로드하고 캐시합니다.
+    * 미리 정의한 다양한 인구 통계, 건강, 식습관 변수에 대해 입력 폼을 제공합니다.
+    * 입력된 값으로 우울증 위험도를 예측하고, 기여도를 계산하여 주요 요인을 표시합니다.
+    * 설명을 LLM 또는 규칙 기반으로 생성합니다.
+    * 간단한 챗봇 인터페이스를 통해 추가 질문에 답변합니다.
     """
     st.set_page_config(page_title="우울증 위험도 예측", page_icon="🧠", layout="centered")
     st.title("개인 맞춤형 우울증 위험도 예측")
     disclaimer()
+
     # 모델 로드
     model = load_model()
     if model is None:
         st.stop()
 
-    # 특성 이름: scikit‑learn 모델에서 추출하거나 사용자에게 입력 받음
-    if hasattr(model, "feature_names_in_"):
-        feature_names: List[str] = [str(f) for f in model.feature_names_in_]
-    else:
-        feature_input = st.text_input("모델에 사용된 특성 이름을 쉼표로 구분하여 입력하세요.")
-        if not feature_input:
-            st.info("모델에 특성 이름을 제공하지 않으면 입력 폼을 생성할 수 없습니다.")
-            st.stop()
-        feature_names = [f.strip() for f in feature_input.split(",") if f.strip()]
-        if not feature_names:
-            st.error("올바른 특성 이름을 입력하세요.")
-            st.stop()
+    # 입력 변수 정의: 변수명과 라벨, 타입, 옵션 지정
+    feature_definitions = [
+        ("sex", {"label": "성별", "type": "select", "options": {1: "남자", 2: "여자"}}),
+        ("age", {"label": "현재 나이", "type": "number"}),
+        ("individual_income", {"label": "개인소득", "type": "select", "options": {1: "매우 낮음", 2: "낮음", 3: "높음", 4: "매우 높음"}}),
+        ("household_income", {"label": "가구소득", "type": "select", "options": {1: "매우 낮음", 2: "낮음", 3: "높음", 4: "매우 높음"}}),
+        ("education_level", {"label": "학력", "type": "select", "options": {1: "초등학교 이하", 2: "중학교 졸업", 3: "고등학교 졸업", 4: "대학교 이상"}}),
+        ("occupation", {"label": "직업 여부", "type": "select", "options": {1: "직업 있음", 0: "직업 없음"}}),
+        ("number_of_household_member", {"label": "독거 여부", "type": "select", "options": {1: "독거", 2: "동거"}}),
+        ("house_status", {"label": "주택 소유 여부", "type": "select", "options": {1: "소유", 0: "미소유"}}),
+        ("marital_statues", {"label": "결혼 여부", "type": "select", "options": {1: "기혼", 0: "미혼"}}),
+        ("subjective_health_status", {"label": "주관적 건강상태", "type": "select", "options": {1: "나쁨", 2: "보통", 3: "좋음"}}),
+        ("unmet_medical_care", {"label": "의료 이용 여부", "type": "select", "options": {1: "치료 받지 못함", 0: "치료 받음"}}),
+        ("labor_hour", {"label": "주간 근로시간", "type": "number"}),
+        ("smoking", {"label": "흡연 여부", "type": "select", "options": {1: "흡연자", 0: "비흡연자"}}),
+        ("drinking", {"label": "음주 여부", "type": "select", "options": {1: "음주자", 0: "비음주자"}}),
+        ("stress", {"label": "스트레스 정도", "type": "select", "options": {1: "스트레스 없음", 2: "스트레스 낮음", 3: "스트레스 높음", 4: "스트레스 매우 높음"}}),
+        ("hpa_work", {"label": "일로 인한 고강도 신체활동", "type": "select", "options": {1: "예", 0: "아니오"}}),
+        ("mpa_work", {"label": "일로 인한 중등도 신체활동", "type": "select", "options": {1: "예", 0: "아니오"}}),
+        ("hpa_leisure", {"label": "여가로 고강도 신체활동", "type": "select", "options": {1: "예", 0: "아니오"}}),
+        ("mpa_leisure", {"label": "여가로 중등도 신체활동", "type": "select", "options": {1: "예", 0: "아니오"}}),
+        ("walk", {"label": "걷기 여부", "type": "select", "options": {1: "예", 0: "아니오"}}),
+        ("sedantary_hour", {"label": "하루 평균 앉아있는 시간", "type": "number"}),
+        ("body_mass_index", {"label": "체질량지수", "type": "number"}),
+        ("food_intake", {"label": "식품 섭취량", "type": "number"}),
+        ("calorie_intake", {"label": "칼로리 섭취량", "type": "number"}),
+        ("weter_intake", {"label": "물 섭취량", "type": "number"}),
+        ("protein", {"label": "단백질 섭취량", "type": "number"}),
+        ("saturated_fatty_acid", {"label": "포화지방산 섭취량", "type": "number"}),
+        ("mono_unsaturated_fatty_acid", {"label": "단일불포화지방산 섭취량", "type": "number"}),
+        ("n3_fatty_acid", {"label": "n3 지방산 섭취량", "type": "number"}),
+        ("n6_fatty_acid", {"label": "n6 지방산 섭취량", "type": "number"}),
+        ("cholesterol", {"label": "콜레스테롤 섭취량", "type": "number"}),
+        ("carbohydrate", {"label": "탄수화물 섭취량", "type": "number"}),
+        ("dietary_fiber", {"label": "식이섬유 섭취량", "type": "number"}),
+        ("calcium", {"label": "칼슘 섭취량", "type": "number"}),
+        ("phosphorus", {"label": "인 섭취량", "type": "number"}),
+        ("iron", {"label": "철분 섭취량", "type": "number"}),
+        ("soudim", {"label": "나트륨 섭취량", "type": "number"}),
+        ("potassium", {"label": "칼륨 섭취량", "type": "number"}),
+        ("betacarotine", {"label": "베타카로틴 섭취량", "type": "number"}),
+        ("retinol", {"label": "레티놀 섭취량", "type": "number"}),
+        ("vitamin_b1", {"label": "비타민 B1 섭취량", "type": "number"}),
+        ("vitamin_b2", {"label": "비타민 B2 섭취량", "type": "number"}),
+        ("vitamin_b3", {"label": "비타민 B3 섭취량", "type": "number"}),
+        ("vitamin_c", {"label": "비타민 C 섭취량", "type": "number"}),
+        ("cardiovascular_disease", {"label": "심혈관 질환 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("arthritis_disease", {"label": "관절염 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("pulmonary_disease", {"label": "호흡기계 질환 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("liver_disease", {"label": "간 질환 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("thyroid_disease", {"label": "갑상선 질환 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("t2_diabetes_mellitus", {"label": "제2형 당뇨병 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("atopic_dermatitis", {"label": "아토피 피부염 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("allergic_rhinitis", {"label": "알레르기성 비염 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("renal_disease", {"label": "신장 질환 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+        ("cancer", {"label": "암 여부", "type": "select", "options": {1: "있음", 0: "없음"}}),
+    ]
 
-    # 사용자 입력: number_input 으로 구성
-    st.subheader("영양소 섭취량을 입력하세요")
+    feature_names: List[str] = [name for name, _ in feature_definitions]
+    st.subheader("입력 파라미터를 선택하세요")
     user_values: Dict[str, float] = {}
     cols = st.columns(2)
-    for i, name in enumerate(feature_names):
+    # 각 입력 필드를 생성
+    for i, (name, info) in enumerate(feature_definitions):
         with cols[i % 2]:
-            user_values[name] = st.number_input(name, value=0.0, step=0.1, format="%.2f")
+            if info["type"] == "select":
+                display_options = list(info["options"].values())
+                selected_display = st.selectbox(info["label"], display_options, key=name)
+                for code, disp in info["options"].items():
+                    if disp == selected_display:
+                        user_values[name] = code
+                        break
+            else:
+                value = st.number_input(info["label"], value=0.0, step=0.1, key=name)
+                user_values[name] = float(value)
 
-    # 예측 실행 버튼
+    # 예측 실행
     if st.button("우울증 위험도 예측하기"):
         X_input = pd.DataFrame([user_values], columns=feature_names)
-        # 모델에서 확률 예측
         try:
             proba = model.predict_proba(X_input)[0][1]
         except Exception as e:
             st.error(f"모델 예측 중 오류가 발생했습니다: {e}")
             proba = 0.0
-        # 기여도 계산
         contributions = compute_contributions(model, X_input)
         top_feats = get_top_features(contributions, feature_names)
-        # LLM 로딩
         generator = load_text_generator()
-        # 설명 생성
         explanation = build_explanation(proba, top_feats, generator=generator)
-        # 결과 표시
         st.markdown("---")
         st.subheader("예측 결과")
         st.metric(label="우울증 위험도", value=f"{proba*100:.1f}%")
@@ -313,25 +395,19 @@ def main() -> None:
         st.subheader("맞춤형 설명")
         st.write(explanation)
 
-    # 챗봇 영역
+    # 챗봇 인터페이스
     st.markdown("---")
     st.subheader("챗봇에게 질문하기")
-    # 세션 상태 초기화
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    # 이전 대화 표시
     for msg in st.session_state.messages:
         st.chat_message(msg["role"]).write(msg["content"])
-    # 입력 상자
     user_question = st.chat_input("궁금한 내용을 입력하세요.")
     if user_question:
-        # 사용자 메시지 저장 및 표시
         st.session_state.messages.append({"role": "user", "content": user_question})
         st.chat_message("user").write(user_question)
-        # 챗봇 응답 생성
         generator = load_text_generator()
         answer = respond_chat(user_question, generator=generator)
-        # 응답 저장 및 표시
         st.session_state.messages.append({"role": "assistant", "content": answer})
         st.chat_message("assistant").write(answer)
 
