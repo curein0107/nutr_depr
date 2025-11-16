@@ -1,3 +1,31 @@
+"""
+phq9_streamlit_app.py
+======================
+
+이 Streamlit 애플리케이션은 영양 섭취 데이터를 바탕으로 우울증 위험도를 추정하고,
+모델이 판단한 핵심 영향 요인을 사용자에게 보여줍니다. 또한 간단한
+자연어 설명과 챗봇 인터페이스를 제공하여 추가적인 궁금증에 답하도록
+설계되었습니다. 기존의 데모 스크립트(`phq9_shap_llm_app.py`)는 커맨드라인
+용으로 작성되어 있으며 `shap`와 `transformers` 라이브러리에 의존합니다.
+이 앱은 다음과 같은 이유로 경량화와 최적화에 초점을 맞춥니다:
+
+* 외부 네트워크 접속 없이 실행되도록 하기 위해 `shap`과 대형 LLM
+  라이브러리에 대한 의존성을 제거하거나 선택적으로 사용합니다.
+* Streamlit의 캐싱 기능을 활용하여 모델과 기타 리소스를 한 번만
+  로드하도록 하여 반복 실행 시 속도를 향상시킵니다.
+* 모델의 특성 중요도를 SHAP 대신 scikit‑learn의 `coef_` 혹은
+  `feature_importances_` 속성을 이용해 근사합니다. 이렇게 하면
+  의존성을 줄이고 계산을 단순화할 수 있습니다.
+* 사용자 입력을 웹 양식으로 받고 결과를 시각적으로 표시하여
+  사용성이 높습니다.
+* 추가 질문을 입력할 수 있는 챗봇 영역을 제공하지만, 의료적
+  조언이 아닌 일반적인 정보만을 제공합니다. 챗봇 응답은 간단한
+  규칙 기반 혹은 작은 LLM(사용 가능한 경우)을 사용해 생성됩니다.
+
+주의: 이 앱은 교육적 목적과 자기 이해를 돕기 위한 참고용입니다.
+정확한 진단이나 치료를 위해서는 반드시 정신건강 전문가와 상담해야 합니다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -22,7 +50,7 @@ def disclaimer() -> None:
     st.warning(
         """이 애플리케이션은 건강 관련 정보를 참고용으로 제공하며,
         전문적인 진단이나 치료를 대신할 수 없습니다. 우울증 위험도
-        예측 결과는 참고 용도로만 사용해야 하며, 자신의 정신건강에
+        예측 결과는 교육적 용도로만 사용해야 하며, 자신의 정신건강에
         관해 궁금한 점이 있으면 반드시 의료 전문가와 상담하시기 바랍니다.""",
         icon="⚠️",
     )
@@ -366,6 +394,72 @@ def main() -> None:
             st.write(f"{feat['feature']} : {arrow} (중요도 {feat['contribution']:.4f})")
         st.subheader("맞춤형 설명")
         st.write(explanation)
+
+        # 영양소별 영향 분석: 우울증 위험을 증가/감소시키는 영양소 TOP 5 시각화
+        # 영양소 변수 목록 정의
+        nutrient_features = {
+            "food_intake",
+            "calorie_intake",
+            "weter_intake",
+            "protein",
+            "saturated_fatty_acid",
+            "mono_unsaturated_fatty_acid",
+            "n3_fatty_acid",
+            "n6_fatty_acid",
+            "cholesterol",
+            "carbohydrate",
+            "dietary_fiber",
+            "calcium",
+            "phosphorus",
+            "iron",
+            "soudim",
+            "potassium",
+            "betacarotine",
+            "retinol",
+            "vitamin_b1",
+            "vitamin_b2",
+            "vitamin_b3",
+            "vitamin_c",
+        }
+        pos_pairs: List[tuple[str, float]] = []
+        neg_pairs: List[tuple[str, float]] = []
+        for i, fname in enumerate(feature_names):
+            if fname in nutrient_features:
+                val = contributions[i]
+                if val > 0:
+                    pos_pairs.append((fname, float(val)))
+                elif val < 0:
+                    neg_pairs.append((fname, float(-val)))  # magnitude for sorting
+        # 정렬하여 상위 5개 선택
+        pos_pairs_sorted = sorted(pos_pairs, key=lambda x: x[1], reverse=True)[:5]
+        neg_pairs_sorted = sorted(neg_pairs, key=lambda x: x[1], reverse=True)[:5]
+        # 데이터프레임 생성
+        if pos_pairs_sorted:
+            pos_df = pd.DataFrame(
+                {"중요도": [v for (_, v) in pos_pairs_sorted]},
+                index=[name for (name, _) in pos_pairs_sorted],
+            )
+        else:
+            pos_df = pd.DataFrame()
+        if neg_pairs_sorted:
+            neg_df = pd.DataFrame(
+                {"중요도": [v for (_, v) in neg_pairs_sorted]},
+                index=[name for (name, _) in neg_pairs_sorted],
+            )
+        else:
+            neg_df = pd.DataFrame()
+        # 시각화
+        st.subheader("우울증 위험을 증가시키는 영양소 TOP 5")
+        if not pos_df.empty:
+            st.bar_chart(pos_df)
+        else:
+            st.write("예측 결과에서 위험을 증가시키는 영양소가 없습니다.")
+        st.subheader("우울증 위험을 감소시키는 영양소 TOP 5")
+        if not neg_df.empty:
+            # 감소 방향은 그래프에서 크기를 양수로 표현하고 레이블에서 감소임을 설명한다
+            st.bar_chart(neg_df)
+        else:
+            st.write("예측 결과에서 위험을 감소시키는 영양소가 없습니다.")
 
     # 챗봇 인터페이스
     st.markdown("---")
